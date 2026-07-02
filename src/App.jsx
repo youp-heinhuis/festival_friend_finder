@@ -574,83 +574,122 @@ export default function App() {
     setPins((current) => [...current, updated]);
   };
 
-  const uploadMapImage = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const uploadMapImage = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
 
-    if (!canChangeMap) {
-      alert("Only the group owner can change the map.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
+  if (!canChangeMap) {
+    alert("Only the group owner can change the map.");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    return;
+  }
 
+  if (!hasSupabaseConfig) {
     const reader = new FileReader();
 
-    reader.onload = async () => {
+    reader.onload = () => {
       const value = String(reader.result);
-
-      if (!hasSupabaseConfig) {
-        setMapImage(value);
-        localStorage.setItem(LOCAL_MAP_IMAGE_KEY, value);
-        setZoom(1);
-        setHelperOpen(false);
-        return;
-      }
-
-      const { error } = await supabase
-        .from("groups")
-        .update({
-          map_image: value,
-          map_updated_at: new Date().toISOString(),
-        })
-        .eq("code", groupCode);
-
-      if (error) {
-        setStatus(`Could not update map: ${error.message}`);
-        return;
-      }
-
       setMapImage(value);
+      localStorage.setItem(LOCAL_MAP_IMAGE_KEY, value);
       setZoom(1);
-      setSelectedPin(null);
       setHelperOpen(false);
     };
 
     reader.readAsDataURL(file);
-  };
+    return;
+  }
 
-  const removeMapImage = async () => {
-    if (!canChangeMap) {
-      alert("Only the group owner can remove the map.");
-      return;
-    }
+  if (!currentUserId) {
+    setStatus("Still connecting to Supabase. Try again in a moment.");
+    return;
+  }
 
-    if (!hasSupabaseConfig) {
-      setMapImage("");
-      localStorage.removeItem(LOCAL_MAP_IMAGE_KEY);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
+  setStatus("Uploading map...");
 
-    const { error } = await supabase
-      .from("groups")
-      .update({
-        map_image: null,
-        map_updated_at: new Date().toISOString(),
-      })
-      .eq("code", groupCode);
+  const safeExtension = file.name.split(".").pop() || "webp";
+  const mapPath = `${groupCode}/map-${Date.now()}.${safeExtension}`;
 
-    if (error) {
-      setStatus(`Could not remove map: ${error.message}`);
-      return;
-    }
+  const { error: uploadError } = await supabase.storage
+    .from("group-maps")
+    .upload(mapPath, file, {
+      cacheControl: "3600",
+      upsert: true,
+      contentType: file.type || "image/webp",
+    });
 
-    setMapImage("");
-    setSelectedPin(null);
-    setZoom(1);
-
+  if (uploadError) {
+    setStatus(`Could not upload map: ${uploadError.message}`);
     if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+    return;
+  }
+
+  const { data: publicUrlData } = supabase.storage
+    .from("group-maps")
+    .getPublicUrl(mapPath);
+
+  const publicUrl = publicUrlData?.publicUrl;
+
+  if (!publicUrl) {
+    setStatus("Could not create public map URL.");
+    return;
+  }
+
+  const { error: updateError } = await supabase
+    .from("groups")
+    .update({
+      map_image: publicUrl,
+      map_updated_at: new Date().toISOString(),
+    })
+    .eq("code", groupCode);
+
+  if (updateError) {
+    setStatus(`Could not update group map: ${updateError.message}`);
+    return;
+  }
+
+  setMapImage(publicUrl);
+  setZoom(1);
+  setSelectedPin(null);
+  setHelperOpen(false);
+  setStatus("Map updated.");
+};
+  
+  const removeMapImage = async () => {
+  if (!canChangeMap) {
+    alert("Only the group owner can remove the map.");
+    return;
+  }
+
+  if (!hasSupabaseConfig) {
+    setMapImage("");
+    localStorage.removeItem(LOCAL_MAP_IMAGE_KEY);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    return;
+  }
+
+  const { error } = await supabase
+    .from("groups")
+    .update({
+      map_image: null,
+      map_updated_at: new Date().toISOString(),
+    })
+    .eq("code", groupCode);
+
+  if (error) {
+    setStatus(`Could not remove map: ${error.message}`);
+    return;
+  }
+
+  setMapImage("");
+  setSelectedPin(null);
+  setZoom(1);
+
+  if (fileInputRef.current) {
+    fileInputRef.current.value = "";
+  }
+
+  setStatus("Map removed.");
+};
 
   const resetView = () => {
     setMessage("");

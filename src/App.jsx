@@ -22,7 +22,7 @@ const LOCAL_MEMBER_ID_KEY = "waar-zijn-mijn-maatjes-local-member-id";
 const LOCAL_MAP_IMAGE_KEY = "waar-zijn-mijn-maatjes-local-map-image";
 
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 3;
+const MAX_ZOOM = 10;
 const ZOOM_STEP = 0.25;
 const PIN_TTL_HOURS = 2;
 const MAX_MAP_SIZE_MB = 5;
@@ -35,41 +35,26 @@ const colourClass = {
   amber: "pin-amber",
   pink: "pin-pink",
   cyan: "pin-cyan",
+  orange: "pin-orange",
+  lime: "pin-lime",
+  fuchsia: "pin-fuchsia",
+  sky: "pin-sky",
+  red: "pin-red",
 };
 
-const colourNames = ["blue", "rose", "emerald", "violet", "amber", "pink", "cyan"];
-
-const demoPins = [
-  {
-    id: "lotte",
-    member_id: "lotte",
-    name: "Lotte",
-    x: 21,
-    y: 35,
-    time: "15:39",
-    message: "At Rex, front left",
-    colour: "rose",
-  },
-  {
-    id: "sam",
-    member_id: "sam",
-    name: "Sam",
-    x: 75,
-    y: 42,
-    time: "15:34",
-    message: "Getting food at Eden",
-    colour: "emerald",
-  },
-  {
-    id: "mila",
-    member_id: "mila",
-    name: "Mila",
-    x: 44,
-    y: 73,
-    time: "15:28",
-    message: "Waiting near Hotot",
-    colour: "violet",
-  },
+const colourNames = [
+  "blue",
+  "rose",
+  "emerald",
+  "violet",
+  "amber",
+  "pink",
+  "cyan",
+  "orange",
+  "lime",
+  "fuchsia",
+  "sky",
+  "red",
 ];
 
 const landmarkData = [
@@ -99,6 +84,21 @@ function makeGroupCode() {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function stringToIndex(value, length) {
+  const input = String(value || "default");
+  let hash = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
+  }
+
+  return hash % length;
+}
+
+function getColourForMember(memberId) {
+  return colourNames[stringToIndex(memberId, colourNames.length)];
 }
 
 function getLocalMemberId() {
@@ -461,7 +461,7 @@ export default function App() {
       y: clamp(((event.clientY - rect.top) / rect.height) * 100, 2, 98),
       time: nowTime(),
       message: message.trim() || "No message",
-      colour: "blue",
+      colour: getColourForMember(activeMemberId),
     };
 
     savePin(pin);
@@ -1024,53 +1024,59 @@ export default function App() {
                     setSelectedPin(pin);
                   }}
                 >
-                  <span className={colourClass[pin.colour] || "pin-blue"}>
+                  <b>{pin.name}</b>
+                  <span className={`pin-marker ${colourClass[pin.colour] || "pin-blue"}`}>
                     <MapPin size={20} />
                   </span>
-                  <b>{pin.name}</b>
                 </button>
               ))}
-
-              {selectedPin && (
-                <div
-                  className="pin-card"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onPointerUp={(event) => event.stopPropagation()}
-                >
-                  <div className="pin-card-body">
-                    <h3>
-                      <span className={`dot ${colourClass[selectedPin.colour] || "pin-blue"}`} />
-                      {selectedPin.name}
-                    </h3>
-
-                    <div className="message">
-                      <small>Message</small>
-                      <p>{selectedPin.message || "No message"}</p>
-                    </div>
-
-                    <p className="time">
-                      <Clock size={13} />
-                      Dropped at {selectedPin.time}
-                    </p>
-                  </div>
-
-                  <div className="pin-card-actions">
-                    <button onClick={() => setSelectedPin(null)}>
-                      <X size={16} />
-                    </button>
-
-                    {selectedPinIsOwnPin && (
-                      <button onClick={deleteOwnPin}>
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </section>
       </main>
+      {selectedPin && (
+        <div
+          className="pin-popup-backdrop"
+          onClick={() => setSelectedPin(null)}
+        >
+          <div
+            className="pin-popup"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+          >
+            <div className="pin-popup-header">
+              <div>
+                <span
+                  className={`dot ${colourClass[selectedPin.colour] || "pin-blue"}`}
+                />
+                <h3>{selectedPin.name}</h3>
+              </div>
+
+              <button onClick={() => setSelectedPin(null)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="message">
+              <small>Message</small>
+              <p>{selectedPin.message || "No message"}</p>
+            </div>
+
+            <p className="time">
+              <Clock size={13} />
+              Dropped at {selectedPin.time}
+            </p>
+
+            {selectedPinIsOwnPin && (
+              <button className="danger full" onClick={deleteOwnPin}>
+                <Trash2 size={16} />
+                Delete my pin
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

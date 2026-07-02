@@ -853,7 +853,7 @@ export default function App() {
               onPointerUp={handleMapPointerUp}
             >
               {mapImage ? (
-                {mapImage}
+                <img src={mapImage} alt="Festival map" className="map-image" />
               ) : (
                 <PlaceholderMap />
               )}

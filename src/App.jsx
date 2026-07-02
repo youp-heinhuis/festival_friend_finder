@@ -180,6 +180,9 @@ export default function App() {
   const mapScrollRef = useRef(null);
   const mapContentRef = useRef(null);
   const pointerStartRef = useRef(null);
+  const activePointersRef = useRef(new Map());
+  const pinchStartRef = useRef(null);
+
 
   const [localMemberId] = useState(getLocalMemberId);
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -212,6 +215,7 @@ export default function App() {
   );
 
   const canChangeMap = !hasSupabaseConfig || isOwner;
+  const canCreateGroup = !hasSupabaseConfig || isOwner;
 
   const shareLink = useMemo(
     () => `${window.location.origin}?group=${groupCode}`,
@@ -458,20 +462,130 @@ export default function App() {
     setSelectedPin(null);
     setHelperOpen(false);
   };
-
+  
+  const getPointerDistance = (first, second) => {
+    return Math.hypot(first.x - second.x, first.y - second.y);
+  };
+  
+  const getActivePointers = () => {
+    return Array.from(activePointersRef.current.values());
+  };
+  
   const handleMapPointerDown = (event) => {
-    if (event.target.closest?.("button")) return;
+  if (event.target.closest?.("button")) return;
 
+  activePointersRef.current.set(event.pointerId, {
+    x: event.clientX,
+    y: event.clientY,
+  });
+
+  if (mapContentRef.current?.setPointerCapture) {
+    try {
+      mapContentRef.current.setPointerCapture(event.pointerId);
+    } catch {
+      // Some browsers may not allow pointer capture in every situation.
+    }
+  }
+
+  const activePointers = getActivePointers();
+
+  if (activePointers.length === 1) {
     pointerStartRef.current = {
+      pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
       time: Date.now(),
+      scrollLeft: mapScrollRef.current?.scrollLeft || 0,
+      scrollTop: mapScrollRef.current?.scrollTop || 0,
+      moved: false,
     };
-  };
+  }
 
-  const handleMapPointerUp = (event) => {
-    if (event.target.closest?.("button")) return;
+  if (activePointers.length === 2) {
+    const distance = getPointerDistance(activePointers[0], activePointers[1]);
 
+    pinchStartRef.current = {
+      distance,
+      zoom,
+    };
+
+    pointerStartRef.current = null;
+    setSelectedPin(null);
+  }
+};
+
+const handleMapPointerMove = (event) => {
+  if (!activePointersRef.current.has(event.pointerId)) return;
+
+  activePointersRef.current.set(event.pointerId, {
+    x: event.clientX,
+    y: event.clientY,
+  });
+
+  const activePointers = getActivePointers();
+
+  if (activePointers.length === 2 && pinchStartRef.current) {
+    event.preventDefault();
+
+    const distance = getPointerDistance(activePointers[0], activePointers[1]);
+    const scale = distance / pinchStartRef.current.distance;
+    const nextZoom = clamp(pinchStartRef.current.zoom * scale, MIN_ZOOM, MAX_ZOOM);
+
+    setZoom(Number(nextZoom.toFixed(2)));
+    return;
+  }
+
+  if (activePointers.length === 1 && pointerStartRef.current && zoom > 1) {
+    const dx = event.clientX - pointerStartRef.current.x;
+    const dy = event.clientY - pointerStartRef.current.y;
+    const distance = Math.hypot(dx, dy);
+
+    if (distance > 6) {
+      pointerStartRef.current.moved = true;
+
+      if (mapScrollRef.current) {
+        mapScrollRef.current.scrollLeft = pointerStartRef.current.scrollLeft - dx;
+        mapScrollRef.current.scrollTop = pointerStartRef.current.scrollTop - dy;
+      }
+    }
+  }
+};
+
+const handleMapPointerUp = (event) => {
+  const hadMultiplePointers = activePointersRef.current.size > 1;
+
+  activePointersRef.current.delete(event.pointerId);
+
+  if (hadMultiplePointers) {
+    pinchStartRef.current = null;
+    pointerStartRef.current = null;
+    return;
+  }
+
+  if (event.target.closest?.("button")) {
+    pointerStartRef.current = null;
+    return;
+  }
+
+  const start = pointerStartRef.current;
+  if (!start) return;
+
+  const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+  const duration = Date.now() - start.time;
+
+  pointerStartRef.current = null;
+
+  if (start.moved || distance > 10 || duration > 800) return;
+
+  placePinFromPointer(event);
+};
+
+const handleMapPointerCancel = (event) => {
+  activePointersRef.current.delete(event.pointerId);
+  pointerStartRef.current = null;
+  pinchStartRef.current = null;
+};
+  
     const start = pointerStartRef.current;
     if (!start) return;
 
@@ -786,12 +900,14 @@ export default function App() {
           </label>
 
           <div className="button-row">
-            <button onClick={createGroup}>
-              <Users size={16} />
-              New group
-            </button>
-
-            <button onClick={copyLink}>
+            {canCreateGroup && (
+              <button onClick={createGroup}>
+                <Users size={16} />
+                New group
+              </button>
+            )}
+          
+            <button onClick={copyLink} className={!canCreateGroup ? "full-span" : ""}>
               <Copy size={16} />
               {copied ? "Copied" : "Copy link"}
             </button>
@@ -887,14 +1003,17 @@ export default function App() {
                 <Plus size={16} />
               </button>
             </div>
-
+            
             <div
               ref={mapContentRef}
               className="map-content"
               style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}
               onPointerDown={handleMapPointerDown}
+              onPointerMove={handleMapPointerMove}
               onPointerUp={handleMapPointerUp}
+              onPointerCancel={handleMapPointerCancel}
             >
+              
               {mapImage ? (
                 <img src={mapImage} alt="Festival map" className="map-image" />
               ) : (
@@ -964,21 +1083,6 @@ export default function App() {
                 </div>
               )}
             </div>
-          </div>
-        </section>
-
-        <section className="info-grid">
-          <div>
-            <strong>Owner controlled map</strong>
-            <p>Only the group owner can upload or remove the shared group map.</p>
-          </div>
-          <div>
-            <strong>Mobile friendly</strong>
-            <p>Pointer events are used so tapping the map works on phones.</p>
-          </div>
-          <div>
-            <strong>Privacy focused</strong>
-            <p>Only name, pin position, time, group and message are stored.</p>
           </div>
         </section>
       </main>

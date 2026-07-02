@@ -1013,8 +1013,9 @@ export default function App() {
               onPointerUp={handleMapPointerUp}
               onPointerCancel={handleMapPointerCancel}
             >
+              
               {mapImage ? (
-                {mapImage}
+                <img src={mapImage} alt="Uploaded festival map" className="map-image" />
               ) : (
                 <PlaceholderMap />
               )}

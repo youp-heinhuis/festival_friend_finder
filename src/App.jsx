@@ -217,7 +217,11 @@ export default function App() {
     () => `${window.location.origin}?group=${groupCode}`,
     [groupCode]
   );
-
+  
+  useEffect(() => {
+    document.title = "Waar zijn mijn maatjes";
+  }, []);
+  
   useEffect(() => {
     localStorage.setItem("rabbit-finder-name", joinName);
   }, [joinName]);
@@ -722,7 +726,7 @@ export default function App() {
             <Smartphone size={14} /> Phone browser app
           </div>
 
-          <h1>Rabbit Finder</h1>
+          <h1>Waar zijn mijn maatjes</h1>
           <p className="muted">
             Drop timed pins on the festival map so your group can find each other quickly.
           </p>

@@ -104,7 +104,10 @@ function getLocalMemberId() {
   let id = localStorage.getItem(LOCAL_MEMBER_ID_KEY);
 
   if (!id) {
-    id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    id = crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+
     localStorage.setItem(LOCAL_MEMBER_ID_KEY, id);
   }
 
@@ -214,8 +217,6 @@ export default function App() {
     () => `${window.location.origin}?group=${groupCode}`,
     [groupCode]
   );
-
-  const zoomPercentage = Math.round(zoom * 100);
 
   useEffect(() => {
     localStorage.setItem("rabbit-finder-name", joinName);
@@ -401,16 +402,6 @@ export default function App() {
       return;
     }
 
-    await supabase
-      .from("groups")
-      .upsert(
-        {
-          code: groupCode,
-          owner_id: groupInfo?.owner_id || currentUserId,
-        },
-        { onConflict: "code" }
-      );
-
     const expiresAt = new Date(
       Date.now() + PIN_TTL_HOURS * 60 * 60 * 1000
     ).toISOString();
@@ -440,6 +431,7 @@ export default function App() {
 
   const placePinFromPointer = (event) => {
     if (!mapContentRef.current) return;
+
     if (hasSupabaseConfig && !currentUserId) {
       setStatus("Still connecting to Supabase. Try again in a moment.");
       return;
@@ -491,3 +483,462 @@ export default function App() {
 
   const deleteOwnPin = async () => {
     if (!hasSupabaseConfig) {
+      localSavePins(pins.filter((pin) => pin.member_id !== activeMemberId));
+      setSelectedPin(null);
+      return;
+    }
+
+    if (!currentUserId) return;
+
+    const { error } = await supabase
+      .from("pins")
+      .delete()
+      .eq("group_code", groupCode)
+      .eq("member_id", currentUserId);
+
+    if (error) {
+      setStatus(`Could not delete pin: ${error.message}`);
+      return;
+    }
+
+    setSelectedPin(null);
+    loadPins();
+  };
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+    } catch {
+      // Clipboard may be blocked in some browsers.
+    }
+
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+
+  const createGroup = async () => {
+    const code = makeGroupCode();
+
+    setGroupCode(code);
+    setPins([]);
+    setSelectedPin(null);
+    setHelperOpen(true);
+    setZoom(1);
+    setMapImage("");
+
+    if (!hasSupabaseConfig || !currentUserId) return;
+
+    const { data, error } = await supabase
+      .from("groups")
+      .insert({
+        code,
+        owner_id: currentUserId,
+        map_image: null,
+        map_updated_at: new Date().toISOString(),
+      })
+      .select("code, owner_id, map_image, map_updated_at, created_at")
+      .single();
+
+    if (error) {
+      setStatus(`Could not create group: ${error.message}`);
+      return;
+    }
+
+    setGroupInfo(data);
+    setStatus("Live sync enabled. You are the group owner.");
+  };
+
+  const addDemoFriend = () => {
+    const existingIds = new Set(pins.map((pin) => pin.member_id));
+    const nextFriend = demoPins.find((friend) => !existingIds.has(friend.member_id));
+
+    const next =
+      nextFriend || {
+        id: `friend-${pins.length + 1}`,
+        member_id: `friend-${pins.length + 1}`,
+        name: `Friend ${pins.length + 1}`,
+        x: 12 + Math.random() * 76,
+        y: 18 + Math.random() * 62,
+        time: nowTime(),
+        message: "Demo location",
+        colour: colourNames[pins.length % colourNames.length],
+      };
+
+    const updated = { ...next, time: nowTime() };
+
+    if (!hasSupabaseConfig) {
+      localSavePins([...pins, updated]);
+      return;
+    }
+
+    setPins((current) => [...current, updated]);
+  };
+
+  const uploadMapImage = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!canChangeMap) {
+      alert("Only the group owner can change the map.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = async () => {
+      const value = String(reader.result);
+
+      if (!hasSupabaseConfig) {
+        setMapImage(value);
+        localStorage.setItem(LOCAL_MAP_IMAGE_KEY, value);
+        setZoom(1);
+        setHelperOpen(false);
+        return;
+      }
+
+      const { error } = await supabase
+        .from("groups")
+        .update({
+          map_image: value,
+          map_updated_at: new Date().toISOString(),
+        })
+        .eq("code", groupCode);
+
+      if (error) {
+        setStatus(`Could not update map: ${error.message}`);
+        return;
+      }
+
+      setMapImage(value);
+      setZoom(1);
+      setSelectedPin(null);
+      setHelperOpen(false);
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  const removeMapImage = async () => {
+    if (!canChangeMap) {
+      alert("Only the group owner can remove the map.");
+      return;
+    }
+
+    if (!hasSupabaseConfig) {
+      setMapImage("");
+      localStorage.removeItem(LOCAL_MAP_IMAGE_KEY);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const { error } = await supabase
+      .from("groups")
+      .update({
+        map_image: null,
+        map_updated_at: new Date().toISOString(),
+      })
+      .eq("code", groupCode);
+
+    if (error) {
+      setStatus(`Could not remove map: ${error.message}`);
+      return;
+    }
+
+    setMapImage("");
+    setSelectedPin(null);
+    setZoom(1);
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const resetView = () => {
+    setMessage("");
+    setSelectedPin(null);
+    setZoom(1);
+    setHelperOpen(true);
+
+    if (!hasSupabaseConfig) {
+      localSavePins([]);
+    }
+
+    if (mapScrollRef.current) {
+      mapScrollRef.current.scrollTop = 0;
+      mapScrollRef.current.scrollLeft = 0;
+    }
+  };
+
+  const setZoomLevel = (nextZoom) => {
+    setZoom(clamp(Number(nextZoom.toFixed(2)), MIN_ZOOM, MAX_ZOOM));
+    setSelectedPin(null);
+  };
+
+  const selectedPinIsOwnPin = selectedPin?.member_id === activeMemberId;
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <section className="panel">
+          <div className="badge">
+            <Smartphone size={14} /> Phone browser app
+          </div>
+
+          <h1>Rabbit Finder</h1>
+          <p className="muted">
+            Drop timed pins on the festival map so your group can find each other quickly.
+          </p>
+
+          <p className="sync-status">
+            <ShieldCheck size={14} /> {status}
+          </p>
+
+          {helperOpen && (
+            <div className="help-box">
+              <strong>How to use it</strong>
+              <ol>
+                <li>Create a group. The creator becomes the owner.</li>
+                <li>Only the owner can upload or change the map.</li>
+                <li>Share the group link with friends.</li>
+                <li>Everyone can tap the map to set their own pin.</li>
+                <li>Tap a pin to read the message.</li>
+              </ol>
+            </div>
+          )}
+
+          <label>
+            Name
+            <input value={joinName} onChange={(event) => setJoinName(event.target.value)} />
+          </label>
+
+          <label>
+            <span>
+              <MessageSquare size={14} /> Optional message
+            </span>
+            <input
+              placeholder="e.g. left of Hotot sound desk"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+            />
+          </label>
+
+          <label>
+            <span>
+              <ImageUp size={14} /> Festival map image
+            </span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={uploadMapImage}
+              disabled={!canChangeMap}
+              className="file-input"
+            />
+            <p className="owner-note">
+              {hasSupabaseConfig
+                ? isOwner
+                  ? "You are the group owner. You can change the map."
+                  : "Only the group owner can change the map."
+                : "Local demo mode. Map changes only apply on this device."}
+            </p>
+          </label>
+
+          <div className="button-row">
+            <button onClick={createGroup}>
+              <Users size={16} />
+              New group
+            </button>
+
+            <button onClick={copyLink}>
+              <Copy size={16} />
+              {copied ? "Copied" : "Copy link"}
+            </button>
+          </div>
+
+          {import.meta.env.DEV && (
+            <button className="secondary full" onClick={addDemoFriend}>
+              <Plus size={16} />
+              Add demo friend
+            </button>
+          )}
+
+          <div className="link-box">
+            <div>
+              <LinkIcon size={16} />
+              Group link
+            </div>
+            <p>{shareLink}</p>
+          </div>
+
+          {mapImage && canChangeMap && (
+            <button className="secondary full" onClick={removeMapImage}>
+              Remove map image
+            </button>
+          )}
+
+          <button className="secondary full" onClick={resetView}>
+            Reset view
+          </button>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Group members</h2>
+            <span>
+              {pins.length} pin{pins.length === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          <div className="member-list">
+            {pins.length === 0 ? (
+              <p className="empty">No pins yet. Tap the map to add yours.</p>
+            ) : (
+              pins.map((pin) => (
+                <button
+                  key={pin.member_id}
+                  onClick={() => setSelectedPin(pin)}
+                  className="member"
+                >
+                  <span className={`dot ${colourClass[pin.colour] || "pin-blue"}`} />
+                  <span>
+                    <strong>{pin.name}</strong>
+                    <small>{pin.message}</small>
+                  </span>
+                  <em>
+                    <Clock size={12} />
+                    {pin.time}
+                  </em>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+      </aside>
+
+      <main className="main">
+        <section className="map-card">
+          <div className="map-header">
+            <div>
+              <h2>Festival map</h2>
+              <p>Tap the map to set your pin. Tap a pin to show its message.</p>
+            </div>
+            <span>Group {groupCode}</span>
+          </div>
+
+          <div className="map-scroll" ref={mapScrollRef}>
+            <div
+              className="zoom-controls"
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+            >
+              <button
+                onClick={() => setZoomLevel(zoom - ZOOM_STEP)}
+                disabled={zoom <= MIN_ZOOM}
+              >
+                <Minus size={16} />
+              </button>
+              <button onClick={() => setZoomLevel(1)}>{Math.round(zoom * 100)}%</button>
+              <button
+                onClick={() => setZoomLevel(zoom + ZOOM_STEP)}
+                disabled={zoom >= MAX_ZOOM}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+
+            <div
+              ref={mapContentRef}
+              className="map-content"
+              style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}
+              onPointerDown={handleMapPointerDown}
+              onPointerUp={handleMapPointerUp}
+            >
+              {mapImage ? (
+                {mapImage}
+              ) : (
+                <PlaceholderMap />
+              )}
+
+              {!mapImage && (
+                <div className="map-note">
+                  No group map has been set yet. The owner can upload the real map.
+                </div>
+              )}
+
+              {pins.map((pin) => (
+                <button
+                  key={pin.member_id}
+                  className="pin"
+                  style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerUp={(event) => {
+                    event.stopPropagation();
+                    setSelectedPin(pin);
+                  }}
+                >
+                  <span className={colourClass[pin.colour] || "pin-blue"}>
+                    <MapPin size={20} />
+                  </span>
+                  <b>{pin.name}</b>
+                </button>
+              ))}
+
+              {selectedPin && (
+                <div
+                  className="pin-card"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerUp={(event) => event.stopPropagation()}
+                >
+                  <div className="pin-card-body">
+                    <h3>
+                      <span
+                        className={`dot ${colourClass[selectedPin.colour] || "pin-blue"}`}
+                      />
+                      {selectedPin.name}
+                    </h3>
+
+                    <div className="message">
+                      <small>Message</small>
+                      <p>{selectedPin.message || "No message"}</p>
+                    </div>
+
+                    <p className="time">
+                      <Clock size={13} />
+                      Dropped at {selectedPin.time}
+                    </p>
+                  </div>
+
+                  <div className="pin-card-actions">
+                    <button onClick={() => setSelectedPin(null)}>
+                      <X size={16} />
+                    </button>
+
+                    {selectedPinIsOwnPin && (
+                      <button onClick={deleteOwnPin}>
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="info-grid">
+          <div>
+            <strong>Owner controlled map</strong>
+            <p>Only the group owner can upload or remove the shared group map.</p>
+          </div>
+          <div>
+            <strong>Mobile friendly</strong>
+            <p>Pointer events are used so tapping the map works on phones.</p>
+          </div>
+          <div>
+            <strong>Privacy focused</strong>
+            <p>Only name, pin position, time, group and message are stored.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}

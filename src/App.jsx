@@ -17,14 +17,15 @@ import {
 import { hasSupabaseConfig, supabase } from "./supabaseClient";
 import "./styles.css";
 
-const STORAGE_KEY = "rabbit-finder-final-v2";
-const LOCAL_MEMBER_ID_KEY = "rabbit-finder-local-member-id";
-const LOCAL_MAP_IMAGE_KEY = "rabbit-finder-local-map-image";
+const STORAGE_KEY = "waar-zijn-mijn-maatjes-v1";
+const LOCAL_MEMBER_ID_KEY = "waar-zijn-mijn-maatjes-local-member-id";
+const LOCAL_MAP_IMAGE_KEY = "waar-zijn-mijn-maatjes-local-map-image";
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.25;
 const PIN_TTL_HOURS = 2;
+const MAX_MAP_SIZE_MB = 5;
 
 const colourClass = {
   blue: "pin-blue",
@@ -118,7 +119,7 @@ function getInitialGroupCode() {
   const url = new URL(window.location.href);
   const fromQuery = url.searchParams.get("group");
   const fromPath = url.pathname.match(/\/g\/([^/]+)/)?.[1];
-  const fromStorage = localStorage.getItem("rabbit-finder-group");
+  const fromStorage = localStorage.getItem("waar-zijn-mijn-maatjes-group");
 
   return (fromQuery || fromPath || fromStorage || "DTRH26").toUpperCase();
 }
@@ -183,14 +184,13 @@ export default function App() {
   const activePointersRef = useRef(new Map());
   const pinchStartRef = useRef(null);
 
-
   const [localMemberId] = useState(getLocalMemberId);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [groupInfo, setGroupInfo] = useState(null);
 
   const [groupCode, setGroupCode] = useState(getInitialGroupCode);
   const [joinName, setJoinName] = useState(
-    () => localStorage.getItem("rabbit-finder-name") || "Youp"
+    () => localStorage.getItem("waar-zijn-mijn-maatjes-name") || "Youp"
   );
   const [message, setMessage] = useState("");
   const [mapImage, setMapImage] = useState(
@@ -215,23 +215,25 @@ export default function App() {
   );
 
   const canChangeMap = !hasSupabaseConfig || isOwner;
-  const canCreateGroup = !hasSupabaseConfig || isOwner;
+
+  const canCreateGroup =
+    !hasSupabaseConfig || Boolean(currentUserId && (!groupInfo || isOwner));
 
   const shareLink = useMemo(
     () => `${window.location.origin}?group=${groupCode}`,
     [groupCode]
   );
-  
+
   useEffect(() => {
     document.title = "Waar zijn mijn maatjes";
   }, []);
-  
+
   useEffect(() => {
-    localStorage.setItem("rabbit-finder-name", joinName);
+    localStorage.setItem("waar-zijn-mijn-maatjes-name", joinName);
   }, [joinName]);
 
   useEffect(() => {
-    localStorage.setItem("rabbit-finder-group", groupCode);
+    localStorage.setItem("waar-zijn-mijn-maatjes-group", groupCode);
   }, [groupCode]);
 
   useEffect(() => {
@@ -345,8 +347,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!hasSupabaseConfig || !currentUserId || !groupCode) {
+    if (!hasSupabaseConfig) {
       loadPins();
+      return;
+    }
+
+    if (!currentUserId || !groupCode) {
       return;
     }
 
@@ -462,130 +468,111 @@ export default function App() {
     setSelectedPin(null);
     setHelperOpen(false);
   };
-  
+
   const getPointerDistance = (first, second) => {
     return Math.hypot(first.x - second.x, first.y - second.y);
   };
-  
+
   const getActivePointers = () => {
     return Array.from(activePointersRef.current.values());
   };
-  
+
   const handleMapPointerDown = (event) => {
-  if (event.target.closest?.("button")) return;
+    if (event.target.closest?.("button")) return;
 
-  activePointersRef.current.set(event.pointerId, {
-    x: event.clientX,
-    y: event.clientY,
-  });
-
-  if (mapContentRef.current?.setPointerCapture) {
-    try {
-      mapContentRef.current.setPointerCapture(event.pointerId);
-    } catch {
-      // Some browsers may not allow pointer capture in every situation.
-    }
-  }
-
-  const activePointers = getActivePointers();
-
-  if (activePointers.length === 1) {
-    pointerStartRef.current = {
-      pointerId: event.pointerId,
+    activePointersRef.current.set(event.pointerId, {
       x: event.clientX,
       y: event.clientY,
-      time: Date.now(),
-      scrollLeft: mapScrollRef.current?.scrollLeft || 0,
-      scrollTop: mapScrollRef.current?.scrollTop || 0,
-      moved: false,
-    };
-  }
+    });
 
-  if (activePointers.length === 2) {
-    const distance = getPointerDistance(activePointers[0], activePointers[1]);
-
-    pinchStartRef.current = {
-      distance,
-      zoom,
-    };
-
-    pointerStartRef.current = null;
-    setSelectedPin(null);
-  }
-};
-
-const handleMapPointerMove = (event) => {
-  if (!activePointersRef.current.has(event.pointerId)) return;
-
-  activePointersRef.current.set(event.pointerId, {
-    x: event.clientX,
-    y: event.clientY,
-  });
-
-  const activePointers = getActivePointers();
-
-  if (activePointers.length === 2 && pinchStartRef.current) {
-    event.preventDefault();
-
-    const distance = getPointerDistance(activePointers[0], activePointers[1]);
-    const scale = distance / pinchStartRef.current.distance;
-    const nextZoom = clamp(pinchStartRef.current.zoom * scale, MIN_ZOOM, MAX_ZOOM);
-
-    setZoom(Number(nextZoom.toFixed(2)));
-    return;
-  }
-
-  if (activePointers.length === 1 && pointerStartRef.current && zoom > 1) {
-    const dx = event.clientX - pointerStartRef.current.x;
-    const dy = event.clientY - pointerStartRef.current.y;
-    const distance = Math.hypot(dx, dy);
-
-    if (distance > 6) {
-      pointerStartRef.current.moved = true;
-
-      if (mapScrollRef.current) {
-        mapScrollRef.current.scrollLeft = pointerStartRef.current.scrollLeft - dx;
-        mapScrollRef.current.scrollTop = pointerStartRef.current.scrollTop - dy;
+    if (mapContentRef.current?.setPointerCapture) {
+      try {
+        mapContentRef.current.setPointerCapture(event.pointerId);
+      } catch {
+        // Some browsers may not allow pointer capture in every situation.
       }
     }
-  }
-};
 
-const handleMapPointerUp = (event) => {
-  const hadMultiplePointers = activePointersRef.current.size > 1;
+    const activePointers = getActivePointers();
 
-  activePointersRef.current.delete(event.pointerId);
+    if (activePointers.length === 1) {
+      pointerStartRef.current = {
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        time: Date.now(),
+        scrollLeft: mapScrollRef.current?.scrollLeft || 0,
+        scrollTop: mapScrollRef.current?.scrollTop || 0,
+        moved: false,
+      };
+    }
 
-  if (hadMultiplePointers) {
-    pinchStartRef.current = null;
-    pointerStartRef.current = null;
-    return;
-  }
+    if (activePointers.length === 2) {
+      const distance = getPointerDistance(activePointers[0], activePointers[1]);
 
-  if (event.target.closest?.("button")) {
-    pointerStartRef.current = null;
-    return;
-  }
+      pinchStartRef.current = {
+        distance,
+        zoom,
+      };
 
-  const start = pointerStartRef.current;
-  if (!start) return;
+      pointerStartRef.current = null;
+      setSelectedPin(null);
+    }
+  };
 
-  const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-  const duration = Date.now() - start.time;
+  const handleMapPointerMove = (event) => {
+    if (!activePointersRef.current.has(event.pointerId)) return;
 
-  pointerStartRef.current = null;
+    activePointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
 
-  if (start.moved || distance > 10 || duration > 800) return;
+    const activePointers = getActivePointers();
 
-  placePinFromPointer(event);
-};
+    if (activePointers.length === 2 && pinchStartRef.current) {
+      event.preventDefault();
 
-const handleMapPointerCancel = (event) => {
-  activePointersRef.current.delete(event.pointerId);
-  pointerStartRef.current = null;
-  pinchStartRef.current = null;
-};
-  
+      const distance = getPointerDistance(activePointers[0], activePointers[1]);
+      const scale = distance / pinchStartRef.current.distance;
+      const nextZoom = clamp(pinchStartRef.current.zoom * scale, MIN_ZOOM, MAX_ZOOM);
+
+      setZoom(Number(nextZoom.toFixed(2)));
+      return;
+    }
+
+    if (activePointers.length === 1 && pointerStartRef.current && zoom > 1) {
+      const dx = event.clientX - pointerStartRef.current.x;
+      const dy = event.clientY - pointerStartRef.current.y;
+      const distance = Math.hypot(dx, dy);
+
+      if (distance > 6) {
+        pointerStartRef.current.moved = true;
+
+        if (mapScrollRef.current) {
+          mapScrollRef.current.scrollLeft = pointerStartRef.current.scrollLeft - dx;
+          mapScrollRef.current.scrollTop = pointerStartRef.current.scrollTop - dy;
+        }
+      }
+    }
+  };
+
+  const handleMapPointerUp = (event) => {
+    const hadMultiplePointers = activePointersRef.current.size > 1;
+
+    activePointersRef.current.delete(event.pointerId);
+
+    if (hadMultiplePointers) {
+      pinchStartRef.current = null;
+      pointerStartRef.current = null;
+      return;
+    }
+
+    if (event.target.closest?.("button")) {
+      pointerStartRef.current = null;
+      return;
+    }
+
     const start = pointerStartRef.current;
     if (!start) return;
 
@@ -594,9 +581,15 @@ const handleMapPointerCancel = (event) => {
 
     pointerStartRef.current = null;
 
-    if (distance > 10 || duration > 800) return;
+    if (start.moved || distance > 10 || duration > 800) return;
 
     placePinFromPointer(event);
+  };
+
+  const handleMapPointerCancel = (event) => {
+    activePointersRef.current.delete(event.pointerId);
+    pointerStartRef.current = null;
+    pinchStartRef.current = null;
   };
 
   const deleteOwnPin = async () => {
@@ -693,121 +686,128 @@ const handleMapPointerCancel = (event) => {
   };
 
   const uploadMapImage = async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-  if (!canChangeMap) {
-    alert("Only the group owner can change the map.");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    return;
-  }
+    const maxMapSizeBytes = MAX_MAP_SIZE_MB * 1024 * 1024;
 
-  if (!hasSupabaseConfig) {
-    const reader = new FileReader();
+    if (file.size > maxMapSizeBytes) {
+      alert(`Please upload a map smaller than ${MAX_MAP_SIZE_MB} MB.`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
-    reader.onload = () => {
-      const value = String(reader.result);
-      setMapImage(value);
-      localStorage.setItem(LOCAL_MAP_IMAGE_KEY, value);
-      setZoom(1);
-      setHelperOpen(false);
-    };
+    if (!canChangeMap) {
+      alert("Only the group owner can change the map.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
-    reader.readAsDataURL(file);
-    return;
-  }
+    if (!hasSupabaseConfig) {
+      const reader = new FileReader();
 
-  if (!currentUserId) {
-    setStatus("Still connecting to Supabase. Try again in a moment.");
-    return;
-  }
+      reader.onload = () => {
+        const value = String(reader.result);
+        setMapImage(value);
+        localStorage.setItem(LOCAL_MAP_IMAGE_KEY, value);
+        setZoom(1);
+        setHelperOpen(false);
+      };
 
-  setStatus("Uploading map...");
+      reader.readAsDataURL(file);
+      return;
+    }
 
-  const safeExtension = file.name.split(".").pop() || "webp";
-  const mapPath = `${groupCode}/map-${Date.now()}.${safeExtension}`;
+    if (!currentUserId) {
+      setStatus("Still connecting to Supabase. Try again in a moment.");
+      return;
+    }
 
-  const { error: uploadError } = await supabase.storage
-    .from("group-maps")
-    .upload(mapPath, file, {
-      cacheControl: "3600",
-      upsert: true,
-      contentType: file.type || "image/webp",
-    });
+    setStatus("Uploading map...");
 
-  if (uploadError) {
-    setStatus(`Could not upload map: ${uploadError.message}`);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    return;
-  }
+    const rawExtension = file.name.split(".").pop() || "webp";
+    const safeExtension = rawExtension.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "webp";
+    const mapPath = `${groupCode}/map-${Date.now()}.${safeExtension}`;
 
-  const { data: publicUrlData } = supabase.storage
-    .from("group-maps")
-    .getPublicUrl(mapPath);
+    const { error: uploadError } = await supabase.storage
+      .from("group-maps")
+      .upload(mapPath, file, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: file.type || "image/webp",
+      });
 
-  const publicUrl = publicUrlData?.publicUrl;
+    if (uploadError) {
+      setStatus(`Could not upload map: ${uploadError.message}`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
-  if (!publicUrl) {
-    setStatus("Could not create public map URL.");
-    return;
-  }
+    const { data: publicUrlData } = supabase.storage
+      .from("group-maps")
+      .getPublicUrl(mapPath);
 
-  const { error: updateError } = await supabase
-    .from("groups")
-    .update({
-      map_image: publicUrl,
-      map_updated_at: new Date().toISOString(),
-    })
-    .eq("code", groupCode);
+    const publicUrl = publicUrlData?.publicUrl;
 
-  if (updateError) {
-    setStatus(`Could not update group map: ${updateError.message}`);
-    return;
-  }
+    if (!publicUrl) {
+      setStatus("Could not create public map URL.");
+      return;
+    }
 
-  setMapImage(publicUrl);
-  setZoom(1);
-  setSelectedPin(null);
-  setHelperOpen(false);
-  setStatus("Map updated.");
-};
-  
+    const { error: updateError } = await supabase
+      .from("groups")
+      .update({
+        map_image: publicUrl,
+        map_updated_at: new Date().toISOString(),
+      })
+      .eq("code", groupCode);
+
+    if (updateError) {
+      setStatus(`Could not update group map: ${updateError.message}`);
+      return;
+    }
+
+    setMapImage(publicUrl);
+    setZoom(1);
+    setSelectedPin(null);
+    setHelperOpen(false);
+    setStatus("Map updated.");
+  };
+
   const removeMapImage = async () => {
-  if (!canChangeMap) {
-    alert("Only the group owner can remove the map.");
-    return;
-  }
+    if (!canChangeMap) {
+      alert("Only the group owner can remove the map.");
+      return;
+    }
 
-  if (!hasSupabaseConfig) {
+    if (!hasSupabaseConfig) {
+      setMapImage("");
+      localStorage.removeItem(LOCAL_MAP_IMAGE_KEY);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const { error } = await supabase
+      .from("groups")
+      .update({
+        map_image: null,
+        map_updated_at: new Date().toISOString(),
+      })
+      .eq("code", groupCode);
+
+    if (error) {
+      setStatus(`Could not remove map: ${error.message}`);
+      return;
+    }
+
     setMapImage("");
-    localStorage.removeItem(LOCAL_MAP_IMAGE_KEY);
+    setSelectedPin(null);
+    setZoom(1);
+
     if (fileInputRef.current) fileInputRef.current.value = "";
-    return;
-  }
 
-  const { error } = await supabase
-    .from("groups")
-    .update({
-      map_image: null,
-      map_updated_at: new Date().toISOString(),
-    })
-    .eq("code", groupCode);
-
-  if (error) {
-    setStatus(`Could not remove map: ${error.message}`);
-    return;
-  }
-
-  setMapImage("");
-  setSelectedPin(null);
-  setZoom(1);
-
-  if (fileInputRef.current) {
-    fileInputRef.current.value = "";
-  }
-
-  setStatus("Map removed.");
-};
+    setStatus("Map removed.");
+  };
 
   const resetView = () => {
     setMessage("");
@@ -906,7 +906,7 @@ const handleMapPointerCancel = (event) => {
                 New group
               </button>
             )}
-          
+
             <button onClick={copyLink} className={!canCreateGroup ? "full-span" : ""}>
               <Copy size={16} />
               {copied ? "Copied" : "Copy link"}
@@ -1003,7 +1003,7 @@ const handleMapPointerCancel = (event) => {
                 <Plus size={16} />
               </button>
             </div>
-            
+
             <div
               ref={mapContentRef}
               className="map-content"
@@ -1013,9 +1013,8 @@ const handleMapPointerCancel = (event) => {
               onPointerUp={handleMapPointerUp}
               onPointerCancel={handleMapPointerCancel}
             >
-              
               {mapImage ? (
-                <img src={mapImage} alt="Festival map" className="map-image" />
+                {mapImage}
               ) : (
                 <PlaceholderMap />
               )}
@@ -1052,9 +1051,7 @@ const handleMapPointerCancel = (event) => {
                 >
                   <div className="pin-card-body">
                     <h3>
-                      <span
-                        className={`dot ${colourClass[selectedPin.colour] || "pin-blue"}`}
-                      />
+                      <span className={`dot ${colourClass[selectedPin.colour] || "pin-blue"}`} />
                       {selectedPin.name}
                     </h3>
 

@@ -473,89 +473,131 @@ export default function App() {
     return Math.hypot(first.x - second.x, first.y - second.y);
   };
 
+  const getPointerCenter = (first, second) => {
+    return {
+      x: (first.x + second.x) / 2,
+      y: (first.y + second.y) / 2,
+    };
+  };
+  
   const getActivePointers = () => {
     return Array.from(activePointersRef.current.values());
   };
 
   const handleMapPointerDown = (event) => {
-    if (event.target.closest?.("button")) return;
+  if (event.target.closest?.("button")) return;
 
-    activePointersRef.current.set(event.pointerId, {
+  activePointersRef.current.set(event.pointerId, {
+    x: event.clientX,
+    y: event.clientY,
+  });
+
+  if (mapContentRef.current?.setPointerCapture) {
+    try {
+      mapContentRef.current.setPointerCapture(event.pointerId);
+    } catch {
+      // Some browsers may not allow pointer capture in every situation.
+    }
+  }
+
+  const activePointers = getActivePointers();
+
+  if (activePointers.length === 1) {
+    pointerStartRef.current = {
+      pointerId: event.pointerId,
       x: event.clientX,
       y: event.clientY,
-    });
+      time: Date.now(),
+      scrollLeft: mapScrollRef.current?.scrollLeft || 0,
+      scrollTop: mapScrollRef.current?.scrollTop || 0,
+      moved: false,
+    };
+  }
 
-    if (mapContentRef.current?.setPointerCapture) {
-      try {
-        mapContentRef.current.setPointerCapture(event.pointerId);
-      } catch {
-        // Some browsers may not allow pointer capture in every situation.
-      }
-    }
+  if (activePointers.length === 2 && mapScrollRef.current) {
+    const distance = getPointerDistance(activePointers[0], activePointers[1]);
+    const center = getPointerCenter(activePointers[0], activePointers[1]);
+    const scrollRect = mapScrollRef.current.getBoundingClientRect();
 
-    const activePointers = getActivePointers();
+    const centerInViewportX = center.x - scrollRect.left;
+    const centerInViewportY = center.y - scrollRect.top;
 
-    if (activePointers.length === 1) {
-      pointerStartRef.current = {
-        pointerId: event.pointerId,
-        x: event.clientX,
-        y: event.clientY,
-        time: Date.now(),
-        scrollLeft: mapScrollRef.current?.scrollLeft || 0,
-        scrollTop: mapScrollRef.current?.scrollTop || 0,
-        moved: false,
-      };
-    }
+    const scrollLeft = mapScrollRef.current.scrollLeft;
+    const scrollTop = mapScrollRef.current.scrollTop;
 
-    if (activePointers.length === 2) {
-      const distance = getPointerDistance(activePointers[0], activePointers[1]);
+    pinchStartRef.current = {
+      distance,
+      zoom,
+      centerInViewportX,
+      centerInViewportY,
+      mapPointX: (scrollLeft + centerInViewportX) / zoom,
+      mapPointY: (scrollTop + centerInViewportY) / zoom,
+    };
 
-      pinchStartRef.current = {
-        distance,
-        zoom,
-      };
-
-      pointerStartRef.current = null;
-      setSelectedPin(null);
-    }
-  };
+    pointerStartRef.current = null;
+    setSelectedPin(null);
+  }
+};
 
   const handleMapPointerMove = (event) => {
-    if (!activePointersRef.current.has(event.pointerId)) return;
+  if (!activePointersRef.current.has(event.pointerId)) return;
 
-    activePointersRef.current.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
+  activePointersRef.current.set(event.pointerId, {
+    x: event.clientX,
+    y: event.clientY,
+  });
+
+  const activePointers = getActivePointers();
+
+  if (activePointers.length === 2 && pinchStartRef.current && mapScrollRef.current) {
+    event.preventDefault();
+
+    const distance = getPointerDistance(activePointers[0], activePointers[1]);
+    const center = getPointerCenter(activePointers[0], activePointers[1]);
+    const scrollRect = mapScrollRef.current.getBoundingClientRect();
+
+    const centerInViewportX = center.x - scrollRect.left;
+    const centerInViewportY = center.y - scrollRect.top;
+
+    const scale = distance / pinchStartRef.current.distance;
+    const nextZoom = clamp(
+      pinchStartRef.current.zoom * scale,
+      MIN_ZOOM,
+      MAX_ZOOM
+    );
+
+    const roundedZoom = Number(nextZoom.toFixed(2));
+
+    setZoom(roundedZoom);
+
+    requestAnimationFrame(() => {
+      if (!mapScrollRef.current || !pinchStartRef.current) return;
+
+      mapScrollRef.current.scrollLeft =
+        pinchStartRef.current.mapPointX * roundedZoom - centerInViewportX;
+
+      mapScrollRef.current.scrollTop =
+        pinchStartRef.current.mapPointY * roundedZoom - centerInViewportY;
     });
 
-    const activePointers = getActivePointers();
+    return;
+  }
 
-    if (activePointers.length === 2 && pinchStartRef.current) {
-      event.preventDefault();
+  if (activePointers.length === 1 && pointerStartRef.current && zoom > 1) {
+    const dx = event.clientX - pointerStartRef.current.x;
+    const dy = event.clientY - pointerStartRef.current.y;
+    const distance = Math.hypot(dx, dy);
 
-      const distance = getPointerDistance(activePointers[0], activePointers[1]);
-      const scale = distance / pinchStartRef.current.distance;
-      const nextZoom = clamp(pinchStartRef.current.zoom * scale, MIN_ZOOM, MAX_ZOOM);
+    if (distance > 6) {
+      pointerStartRef.current.moved = true;
 
-      setZoom(Number(nextZoom.toFixed(2)));
-      return;
-    }
-
-    if (activePointers.length === 1 && pointerStartRef.current && zoom > 1) {
-      const dx = event.clientX - pointerStartRef.current.x;
-      const dy = event.clientY - pointerStartRef.current.y;
-      const distance = Math.hypot(dx, dy);
-
-      if (distance > 6) {
-        pointerStartRef.current.moved = true;
-
-        if (mapScrollRef.current) {
-          mapScrollRef.current.scrollLeft = pointerStartRef.current.scrollLeft - dx;
-          mapScrollRef.current.scrollTop = pointerStartRef.current.scrollTop - dy;
-        }
+      if (mapScrollRef.current) {
+        mapScrollRef.current.scrollLeft = pointerStartRef.current.scrollLeft - dx;
+        mapScrollRef.current.scrollTop = pointerStartRef.current.scrollTop - dy;
       }
     }
-  };
+  }
+};
 
   const handleMapPointerUp = (event) => {
     const hadMultiplePointers = activePointersRef.current.size > 1;
@@ -826,9 +868,31 @@ export default function App() {
   };
 
   const setZoomLevel = (nextZoom) => {
-    setZoom(clamp(Number(nextZoom.toFixed(2)), MIN_ZOOM, MAX_ZOOM));
+  const roundedZoom = clamp(Number(nextZoom.toFixed(2)), MIN_ZOOM, MAX_ZOOM);
+
+  if (!mapScrollRef.current) {
+    setZoom(roundedZoom);
     setSelectedPin(null);
-  };
+    return;
+  }
+
+  const scrollElement = mapScrollRef.current;
+  const viewportCenterX = scrollElement.clientWidth / 2;
+  const viewportCenterY = scrollElement.clientHeight / 2;
+
+  const mapPointX = (scrollElement.scrollLeft + viewportCenterX) / zoom;
+  const mapPointY = (scrollElement.scrollTop + viewportCenterY) / zoom;
+
+  setZoom(roundedZoom);
+  setSelectedPin(null);
+
+  requestAnimationFrame(() => {
+    if (!mapScrollRef.current) return;
+
+    mapScrollRef.current.scrollLeft = mapPointX * roundedZoom - viewportCenterX;
+    mapScrollRef.current.scrollTop = mapPointY * roundedZoom - viewportCenterY;
+  });
+};
 
   const selectedPinIsOwnPin = selectedPin?.member_id === activeMemberId;
 

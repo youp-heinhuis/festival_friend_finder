@@ -21,7 +21,7 @@ input {
   grid-template-columns: 360px 1fr;
   gap: 16px;
   padding: 16px;
-  max-width: 1440px;
+  max-width: 1600px;
   margin: 0 auto;
 }
 
@@ -32,8 +32,7 @@ input {
 }
 
 .panel,
-.map-card,
-.info-grid > div {
+.map-card {
   background: rgba(15, 23, 42, 0.93);
   border: 1px solid #1e293b;
   border-radius: 24px;
@@ -62,6 +61,7 @@ input {
 h1 {
   margin: 12px 0 8px;
   font-size: 32px;
+  line-height: 1.05;
 }
 
 h2 {
@@ -71,7 +71,6 @@ h2 {
 
 .muted,
 .map-header p,
-.info-grid p,
 .empty {
   color: #cbd5e1;
   font-size: 14px;
@@ -158,6 +157,10 @@ input:disabled {
   margin-top: 14px;
 }
 
+.full-span {
+  grid-column: 1 / -1;
+}
+
 button {
   border: 0;
   border-radius: 14px;
@@ -186,7 +189,8 @@ button:disabled {
   font-weight: 800;
 }
 
-.secondary.full {
+.secondary.full,
+.full {
   width: 100%;
   margin-top: 10px;
 }
@@ -306,10 +310,11 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* Larger map section */
 .map-scroll {
   position: relative;
-  aspect-ratio: 4 / 3;
-  min-height: 420px;
+  height: min(78vh, 920px);
+  min-height: 650px;
   overflow: auto;
   background: linear-gradient(135deg, #022c22, #0f172a, #164e63);
 }
@@ -335,6 +340,7 @@ button:disabled {
   padding: 9px;
 }
 
+/* touch-action: none is needed for custom mobile pinch-to-zoom */
 .map-content {
   position: relative;
   min-width: 100%;
@@ -366,14 +372,16 @@ button:disabled {
   pointer-events: none;
 }
 
+/* Pin with name above and pointed bottom marker */
 .pin {
   position: absolute;
   transform: translate(-50%, -100%);
   flex-direction: column;
-  gap: 4px;
+  gap: 7px;
   padding: 0;
   background: transparent;
   touch-action: manipulation;
+  z-index: 20;
 }
 
 .pin:hover {
@@ -381,23 +389,44 @@ button:disabled {
   transform: translate(-50%, -100%) scale(1.05);
 }
 
-.pin span:not(.dot) {
+.pin b {
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 4px 9px;
+  font-size: 12px;
+  line-height: 1;
+  color: white;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+}
+
+.pin-marker {
+  position: relative;
   width: 44px;
   height: 44px;
   display: grid;
   place-items: center;
   border-radius: 999px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-  outline: 4px solid rgba(255, 255, 255, 0.7);
+  outline: 4px solid rgba(255, 255, 255, 0.75);
+  color: white;
 }
 
-.pin b {
-  border-radius: 999px;
-  background: rgba(2, 6, 23, 0.9);
-  padding: 3px 8px;
-  font-size: 12px;
+.pin-marker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  width: 18px;
+  height: 18px;
+  transform: translateX(-50%) rotate(45deg);
+  background: inherit;
+  border-bottom-right-radius: 4px;
+  box-shadow: 7px 7px 15px rgba(0, 0, 0, 0.18);
 }
 
+/* Pin colours */
 .pin-blue {
   background: #2563eb;
 }
@@ -426,32 +455,27 @@ button:disabled {
   background: #0891b2;
 }
 
-.pin-card {
-  position: absolute;
-  z-index: 30;
-  bottom: 16px;
-  left: 16px;
-  right: 16px;
-  max-width: 390px;
-  margin-left: auto;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  background: rgba(2, 6, 23, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  padding: 16px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(12px);
+.pin-orange {
+  background: #ea580c;
 }
 
-.pin-card h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
+.pin-lime {
+  background: #65a30d;
 }
 
+.pin-fuchsia {
+  background: #c026d3;
+}
+
+.pin-sky {
+  background: #0284c7;
+}
+
+.pin-red {
+  background: #dc2626;
+}
+
+/* Shared message styling used inside the popup */
 .message {
   background: #0f172a;
   border-radius: 14px;
@@ -478,20 +502,72 @@ button:disabled {
   align-items: center;
 }
 
-.pin-card-actions {
+/* Centre-screen popup for pin details */
+.pin-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 6, 23, 0.64);
+  backdrop-filter: blur(8px);
+}
+
+.pin-popup {
+  width: min(420px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px;
+  background: rgba(2, 6, 23, 0.96);
+  padding: 18px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+
+.pin-popup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.pin-popup-header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pin-popup-header h3 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.pin-popup-header button {
+  flex: 0 0 auto;
+  padding: 9px;
+}
+
+.pin-card-body {
+  min-width: 0;
+}
+
+.pin-card-actions,
+.pin-popup-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+.danger {
+  margin-top: 14px;
+  background: #7f1d1d;
 }
 
-.info-grid > div {
-  padding: 16px;
+.danger:hover {
+  background: #991b1b;
 }
 
 @media (max-width: 900px) {
@@ -500,20 +576,53 @@ button:disabled {
     padding: 10px;
   }
 
+  h1 {
+    font-size: 28px;
+  }
+
   .map-header {
     flex-direction: column;
   }
 
-  .info-grid {
+  .map-scroll {
+    height: 72vh;
+    min-height: 560px;
+  }
+
+  .pin-popup {
+    width: min(440px, 100%);
+  }
+}
+
+@media (max-width: 520px) {
+  .button-row {
     grid-template-columns: 1fr;
   }
 
+  .full-span {
+    grid-column: auto;
+  }
+
   .map-scroll {
+    height: 70vh;
     min-height: 520px;
   }
-}
 
-.full-span {
-  grid-column: 1 / -1;
-}
+  .pin-marker {
+    width: 42px;
+    height: 42px;
+  }
 
+  .pin b {
+    font-size: 11px;
+  }
+
+  .zoom-controls {
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .zoom-controls button {
+    min-width: 38px;
+  }
+}

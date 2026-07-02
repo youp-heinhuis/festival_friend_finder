@@ -849,19 +849,6 @@ export default function App() {
             <ShieldCheck size={14} /> {status}
           </p>
 
-          {helperOpen && (
-            <div className="help-box">
-              <strong>How to use it</strong>
-              <ol>
-                <li>Create a group. The creator becomes the owner.</li>
-                <li>Only the owner can upload or change the map.</li>
-                <li>Share the group link with friends.</li>
-                <li>Everyone can tap the map to set their own pin.</li>
-                <li>Tap a pin to read the message.</li>
-              </ol>
-            </div>
-          )}
-
           <label>
             Name
             <input value={joinName} onChange={(event) => setJoinName(event.target.value)} />

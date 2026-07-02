@@ -340,7 +340,7 @@ button:disabled {
   min-width: 100%;
   min-height: 100%;
   cursor: crosshair;
-  touch-action: pan-x pan-y;
+  touch-action: none;
 }
 
 .map-image,
@@ -512,3 +512,8 @@ button:disabled {
     min-height: 520px;
   }
 }
+
+.full-span {
+  grid-column: 1 / -1;
+}
+
